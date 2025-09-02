@@ -1,0 +1,91 @@
+import asyncio
+import json
+import httpx
+import time
+
+# Configuration
+BASE_URL = "http://localhost:8000"
+INGEST_ENDPOINT = f"{BASE_URL}/ingest-ad"
+QUERY_ENDPOINT = f"{BASE_URL}/query-ads"
+TEST_DATA_PATH = "test_dataset (3).json"
+HEADERS = {"Content-Type": "application/json"}
+
+async def run_test():
+    """
+    Reads a test dataset, ingests each ad, and then queries for related ads.
+    """
+    try:
+        with open(TEST_DATA_PATH, 'r', encoding='utf-8') as f:
+            test_data = json.load(f)
+    except FileNotFoundError:
+        print(f"Error: Test data file not found at {TEST_DATA_PATH}")
+        return
+    except json.JSONDecodeError:
+        print(f"Error: Could not decode JSON from {TEST_DATA_PATH}")
+        return
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for i, ad_data in enumerate(test_data):
+            print(f"--- Processing Ad {i+1}/{len(test_data)} (ID: {ad_data.get('ad_id')}) ---")
+
+            # 1. Ingest the Ad
+            try:
+                # Ensure required fields are present
+                ad_id = ad_data.get("ad_id")
+                creatives = ad_data.get("creatives")
+                
+                if not ad_id or not creatives or not isinstance(creatives, list) or not creatives[0].get("original_url"):
+                    print(f"Skipping ad due to missing 'ad_id' or 'creatives' data.")
+                    continue
+
+                ingest_payload = {
+                    "ad_id": ad_id,
+                    "raw_data_snapshot": ad_data,
+                    "ad_creative_url": creatives[0]["original_url"]
+                }
+
+                print(f"Attempting to ingest ad ID: {ad_id}")
+                response = await client.post(INGEST_ENDPOINT, json=ingest_payload, headers=HEADERS)
+                response.raise_for_status()
+                ingest_result = response.json()
+                print(f"Ingestion successful: {ingest_result}")
+
+            except httpx.HTTPStatusError as e:
+                print(f"Error during ingestion for ad ID {ad_id}: {e.response.status_code} - {e.response.text}")
+                continue # Skip to next ad if ingestion fails
+            except Exception as e:
+                print(f"An unexpected error occurred during ingestion for ad ID {ad_id}: {e}")
+                continue
+
+            # Give the background enrichment task some time to run
+            print("Waiting 15 seconds for background enrichment...")
+            await asyncio.sleep(15)
+
+            # 2. Query for Related Ads
+            try:
+                query_text = ad_data.get("ad_body_text")
+                if not query_text:
+                    print("No 'ad_body_text' found, using page name as fallback query.")
+                    query_text = ad_data.get("page_name", "default query")
+
+                query_payload = {
+                    "query": query_text,
+                    "k": 3
+                }
+
+                print(f"Querying with text: '{query_text[:80]}...'")
+                response = await client.post(QUERY_ENDPOINT, json=query_payload, headers=HEADERS)
+                response.raise_for_status()
+                query_result = response.json()
+                print("Query successful. Synthesized Answer:")
+                print(query_result.get("answer", "No answer provided."))
+                print("-" * 20)
+
+
+            except httpx.HTTPStatusError as e:
+                print(f"Error during query for ad ID {ad_id}: {e.response.status_code} - {e.response.text}")
+            except Exception as e:
+                print(f"An unexpected error occurred during query for ad ID {ad_id}: {e}")
+
+if __name__ == "__main__":
+    asyncio.run(run_test())
