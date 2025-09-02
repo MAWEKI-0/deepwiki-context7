@@ -23,13 +23,14 @@ DECLARE
   where_clauses TEXT[] := ARRAY['status = ''ENRICHED'''];
   json_key TEXT;
   json_value JSONB;
+  nested_key TEXT; -- Declare nested_key here
 BEGIN
   -- Build WHERE clauses from filter_criteria JSONB
   FOR json_key, json_value IN SELECT * FROM jsonb_each(filter_criteria)
   LOOP
     -- Handle nested keys for strategic_analysis
     IF json_key LIKE 'strategic_analysis.%' THEN
-      let nested_key = split_part(json_key, '.', 2);
+      nested_key := split_part(json_key, '.', 2); -- Assign value using :=
       where_clauses := array_append(where_clauses, format('strategic_analysis->>%L = %L', nested_key, json_value #>> '{}'));
     ELSE
       where_clauses := array_append(where_clauses, format('%I = %L', json_key, json_value #>> '{}'));

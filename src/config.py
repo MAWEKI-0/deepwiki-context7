@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Build a path to the .env file from the project root.
@@ -22,4 +23,10 @@ class Settings(BaseSettings):
     # Embedding Model
     EMBEDDING_MODEL: str = "text-embedding-004" # Or other suitable embedding model
 
-settings = Settings()
+    # Celery
+    REDIS_URL: str = "redis://localhost:6379/0"
+
+    # Logging
+    LOG_LEVEL: str = "INFO"
+    LOG_JSON_FORMAT: bool = False
+    LOG_FILE: Optional[str] = "logs/app.log"

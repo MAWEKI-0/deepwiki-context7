@@ -30,7 +30,7 @@ Our architecture is guided by three fundamental principles:
     Unstructured text is ambiguous. A well-defined schema is not. By forcing every piece of ad data into a standardized, machine-readable format (`knowledge_object`), we turn a library of documents into a true database. This allows for quantitative analysis, trend identification, and pattern matching that is impossible with simple semantic search. The schema is the backbone of our intelligence.
 
 3.  **The Right Mind for the Right Task.**
-    We will employ a cascade of AI models from the Google AI ecosystem, each chosen for its specific strengths. A fast, cost-effective model (e.g., **Gemini 1.5 Flash**) will perform initial triage and visual description. A powerful, deep-reasoning model (e.g., **Gemini 1.5 Pro**) will conduct the final, high-stakes strategic analysis. This ensures we achieve maximum insight at an optimal cost.
+    We will employ a cascade of AI models from the Google AI ecosystem, each chosen for its specific strengths. A fast, cost-effective model (e.g., **gemini-2.5-flash-lite**) will perform initial triage and visual description. A powerful, deep-reasoning model (e.g., **gemini-2.5-flash-lite**) will conduct the final, high-stakes strategic analysis. This ensures we achieve maximum insight at an optimal cost.
 
 ### **1.3. The System in Action: A User Story**
 
@@ -46,21 +46,76 @@ The system operates as two distinct, independent services: an offline **Ingestio
 
 ### **2.1. The Heart of the System: The `knowledge_object` Schema**
 
-The schema for our `Ads` table in Supabase is the most critical component of this architecture. Each ad will be transformed into a row conforming to this structure.
+table_name: Ads
+description: This table holds the core, enriched intelligence for every ad processed.
 
-| Column Name             | Data Type          | Description                                                                                                                                                                                          | Populated By             |
-| :---------------------- | :----------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------- |
-| `id`                    | `UUID` (Primary Key) | Unique identifier for the enriched ad record.                                                                                                                                                        | Supabase (auto)          |
-| `ad_id`                 | `BIGINT`           | The original ID from the Meta Ad Library data source. Indexed for lookups.                                                                                                                           | Ingestion Script       |
-| `raw_data_snapshot`     | `JSONB`            | A complete JSON snapshot of the original, unprocessed ad data for auditing and reprocessing.                                                                                                         | Ingestion Script       |
-| `status`                | `TEXT`             | The processing state of the ad. Values: `PENDING`, `ENRICHING`, `ENRICHED`, `FAILED`. Indexed for the worker queue.                                                                                      | Enrichment Pipeline      |
-| `enriched_at`           | `TIMESTAMPTZ`      | Timestamp of when the enrichment process was successfully completed.                                                                                                                                 | Enrichment Pipeline      |
-| `error_log`             | `TEXT`             | Stores any error messages if the enrichment process fails.                                                                                                                                           | Enrichment Pipeline      |
-| **`strategic_analysis`**  | `JSONB`            | **Core Enriched Data.** A structured object containing the deep strategic analysis. See sub-schema below.                                                                                              | **Gemini 1.5 Pro (Slow)**  |
-| **`visual_analysis`**     | `JSONB`            | A structured object containing the analysis of the ad creative (image/video).                                                                                                                        | **Gemini 1.5 Flash (Fast)**|
-| `audience_persona`      | `TEXT`             | A concise, generated description of the inferred target audience for the ad.                                                                                                                         | Gemini 1.5 Pro (Slow)  |
-| `vector_summary`        | `VECTOR(768)`      | A vector embedding of a concise, natural language summary of the ad's core strategy. Used for semantic search. (Dimension updated to match implementation).                                           | Embedding Model        |
+columns:
+  - name: id
+    type: UUID (Primary Key)
+    description: Unique identifier for the enriched ad record.
+    populated_by: Supabase (auto)
 
+  - name: ad_id
+    type: BIGINT
+    description: The original ID from the Meta Ad Library data source. Indexed for lookups.
+    populated_by: Ingestion Script
+
+  - name: raw_data_snapshot
+    type: JSONB
+    description: A complete JSON snapshot of the original, unprocessed ad data for auditing and reprocessing.
+    populated_by: Ingestion Script
+
+  - name: status
+    type: TEXT
+    description: "The processing state of the ad. Values: `PENDING`, `ENRICHING`, `ENRICHED`, `FAILED`. Indexed for the worker queue."
+    populated_by: Enrichment Pipeline
+
+  - name: enriched_at
+    type: TIMESTAMPTZ
+    description: Timestamp of when the enrichment process was successfully completed.
+    populated_by: Enrichment Pipeline
+
+  - name: error_log
+    type: TEXT
+    description: Stores any error messages if the enrichment process fails.
+    populated_by: Enrichment Pipeline
+
+  - name: strategic_analysis
+    type: JSONB
+    description: "**Core Enriched Data.** A structured object containing the deep strategic analysis."
+    populated_by: gemini-2.5-flash-lite (Slow)
+    sub_schema:
+      - name: marketing_angle
+        type: TEXT
+        example: "Pain-Agitate-Solution", "Social Proof", "Scarcity", "Feature-Benefit"
+      - name: emotional_appeal
+        type: TEXT
+        example: "Hope", "Fear", "Exclusivity", "Convenience", "Urgency"
+      - name: cta_analysis
+        type: TEXT
+        description: A brief analysis of the call-to-action's clarity and effectiveness.
+      - name: key_claims
+        type: TEXT[]
+        description: An array of the primary claims or promises made in the ad copy.
+      - name: confidence_score
+        type: FLOAT
+        description: The LLM's self-reported confidence (0.0 to 1.0) in its analysis.
+
+  - name: visual_analysis
+    type: JSONB
+    description: A structured object containing the analysis of the ad creative (image/video).
+    populated_by: gemini-2.5-flash-lite
+
+  - name: audience_persona
+    type: TEXT
+    description: A concise, generated description of the inferred target audience for the ad.
+    populated_by: gemini-2.5-flash-lite
+
+  - name: vector_summary
+    type: VECTOR(768)
+    description: A vector embedding of a concise, natural language summary of the ad's core strategy. Used for semantic search. (Dimension updated to match implementation).
+    populated_by: Embedding Model
+    
 #### **Sub-Schema for `strategic_analysis` (JSONB Object):**
 
 *   `marketing_angle`: (TEXT) e.g., "Pain-Agitate-Solution", "Social Proof", "Scarcity", "Feature-Benefit".
@@ -76,9 +131,9 @@ The schema for our `Ads` table in Supabase is the most critical component of thi
 1.  A new, raw ad JSON is ingested into the Supabase `Ads` table. Its `raw_data_snapshot` is populated, and its `status` is set to `PENDING`.
 2.  The Python-based Enrichment Pipeline worker continuously polls the database for ads with `status = 'PENDING'`.
 3.  Upon finding one, it sets the `status` to `ENRICHING`.
-4.  **Fast Pass:** It sends the ad creative URL to **Gemini 1.5 Flash** for visual analysis. The result populates the `visual_analysis` field.
-5.  **Slow Pass:** It compiles a rich prompt containing the raw ad text, the targeting data, and the new visual analysis from the fast pass. This is sent to **Gemini 1.5 Pro**.
-6.  Gemini 1.5 Pro performs the deep analysis, returning a structured JSON that populates `strategic_analysis` and `audience_persona`.
+4.  **Fast Pass:** It sends the ad creative URL to **gemini-2.5-flash-lite** for visual analysis. The result populates the `visual_analysis` field.
+5.  **Slow Pass:** It compiles a rich prompt containing the raw ad text, the targeting data, and the new visual analysis from the fast pass. This is sent to **gemini-2.5-flash-lite**.
+6.  gemini-2.5-flash-lite performs the deep analysis, returning a structured JSON that populates `strategic_analysis` and `audience_persona`.
 7.  A separate call to an embedding model generates the vector for `vector_summary`.
 8.  The worker updates the row in Supabase with all enriched data, sets `status` to `ENRICHED`, and updates the `enriched_at` timestamp.
 9.  If any step fails, the `status` is set to `FAILED`, and an error is logged in `error_log`.

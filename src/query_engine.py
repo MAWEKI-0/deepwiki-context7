@@ -4,17 +4,24 @@ from typing import Any, Dict, List, Optional
 import google.generativeai as genai
 from langchain_core.prompts import PromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from llama_index.core import Settings, VectorStoreIndex, SimpleDirectoryReader
-from llama_index.core.schema import TextNode
+from llama_index.core import (
+    VectorStoreIndex,
+    SimpleDirectoryReader,
+    get_response_synthesizer,
+)
+from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.core.retrievers import BaseRetriever
+from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
 from llama_index.vector_stores.supabase import SupabaseVectorStore
 from supabase import Client
 
-from src.config import settings
-from src.models import AdKnowledgeObject, StrategicAnalysis
+from src.config import Settings
+from src.dependencies import get_settings
 from src.logger import logger
+from src.models import AdKnowledgeObject, StrategicAnalysis
 
-# Configure Google AI
-genai.configure(api_key=settings.GOOGLE_API_KEY)
+# Configure Google AI (This will be moved into the functions that use it)
+# genai.configure(api_key=settings.GOOGLE_API_KEY)
 
 # --- Query & Synthesis Prompt ---
 QUERY_SYNTHESIS_PROMPT_TEMPLATE = """
@@ -61,72 +68,94 @@ critique_prompt = PromptTemplate(
     input_variables=["query", "ad_data_context", "initial_answer"],
 )
 
+
+# --- Custom Retriever ---
+class SupabaseHybridRetriever(BaseRetriever):
+    def __init__(
+        self,
+        supabase_client: Client,
+        embedding_model: GoogleGenerativeAIEmbeddings,
+        k: int = 5,
+        filter_criteria: Optional[Dict[str, Any]] = None,
+    ):
+        self._supabase_client = supabase_client
+        self._embedding_model = embedding_model
+        self._k = k
+        self._filter_criteria = filter_criteria or {}
+        super().__init__()
+
+    async def _aretrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
+        """
+        Asynchronously retrieves nodes from Supabase using a hybrid approach.
+        """
+        query_embedding = await self._embedding_model.aembed_query(
+            query_bundle.query_str
+        )
+
+        params = {
+            "query_embedding": query_embedding,
+            "match_count": self._k,
+            "filter_criteria": self._filter_criteria,
+        }
+
+        response = (
+            self._supabase_client.rpc("match_documents_adaptive", params).execute()
+        )
+
+        if not response.data:
+            logger.error(
+                f"Failed to retrieve ads from Supabase: {response.error}"
+            )
+            return []
+
+        nodes = []
+        for ad_data in response.data:
+            ad_object = AdKnowledgeObject(**ad_data)
+            node = TextNode(
+                text=ad_object.model_dump_json(indent=2),
+                metadata={"source": "Supabase"},
+            )
+            # Note: The RPC function does not currently return a score.
+            nodes.append(NodeWithScore(node=node, score=1.0))
+        return nodes
+
+
 # --- Query Engine Functions ---
-
-async def hybrid_retrieve_ads(
-    query: str,
-    embedding_model: GoogleGenerativeAIEmbeddings,
-    supabase: Client,
-    filter_criteria: Optional[Dict[str, Any]] = None,
-    k: int = 5,
-) -> List[AdKnowledgeObject]:
-    """
-    Performs an efficient hybrid retrieval using a Supabase RPC function.
-    """
-    query_embedding = await embedding_model.aembed_query(query)
-    
-    params = {
-        'query_embedding': query_embedding,
-        'match_count': k,
-        'filter_criteria': filter_criteria or {}
-    }
-    
-    response = supabase.rpc('match_documents_adaptive', params).execute()
-    
-    if response.data:
-        return [AdKnowledgeObject(**ad_data) for ad_data in response.data]
-    else:
-        logger.error(f"Failed to retrieve ads from Supabase: {response.error}")
-        return []
-
-
 async def synthesize_answer(
     query: str,
-    retrieved_ads: List[AdKnowledgeObject],
     gemini_pro: ChatGoogleGenerativeAI,
     embedding_model: GoogleGenerativeAIEmbeddings,
+    settings: Settings,  # Inject settings here
+    filter_criteria: Optional[Dict[str, Any]] = None,
+    k: int = 5,
     max_critique_loops: int = 2,
 ) -> str:
     """
     Synthesizes a data-grounded answer from retrieved ad data using a LlamaIndex query engine.
     """
-    if not retrieved_ads:
-        return "I could not find any relevant ads to answer your query."
-
-    # Configure LlamaIndex settings for this request
-    Settings.embed_model = embedding_model
-    Settings.llm = gemini_pro
-
     # --- LlamaIndex Integration ---
-    vector_store = SupabaseVectorStore(
-        postgres_connection_string=settings.SUPABASE_CONNECTION_STRING,
-        collection_name="ads"
+    retriever = SupabaseHybridRetriever(
+        supabase_client=get_settings().supabase_client,
+        embedding_model=embedding_model,
+        k=k,
+        filter_criteria=filter_criteria,
     )
-    index = VectorStoreIndex.from_vector_store(vector_store)
 
-    # Create a query engine from the index
-    query_engine = index.as_query_engine(
+    response_synthesizer = get_response_synthesizer(
+        llm=gemini_pro,
         text_qa_template=query_synthesis_prompt,
-        refine_template=critique_prompt, # Using critique prompt for refinement
-        similarity_top_k=len(retrieved_ads), # Use all retrieved ads
+        refine_template=critique_prompt,
     )
 
-    # Convert retrieved ads to TextNode for LlamaIndex context
-    nodes = [TextNode(text=ad.model_dump_json(indent=2)) for ad in retrieved_ads]
-    
-    # Synthesize the answer using the query engine with the retrieved nodes
-    response = await query_engine.asynthesize(query, nodes=nodes)
-    
+    query_engine = RetrieverQueryEngine(
+        retriever=retriever,
+        response_synthesizer=response_synthesizer,
+    )
+
+    # Synthesize the answer using the query engine
+    response = await query_engine.aquery(query)
+
     return response.response
+
 
 # The main function is now removed as it was for testing purposes and will be replaced by a proper test suite.

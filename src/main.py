@@ -1,18 +1,17 @@
 import asyncio
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from supabase import Client
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 
-from src.enrichment_pipeline import enrich_ad
 from src.models import AdKnowledgeObject
-from src.query_engine import hybrid_retrieve_ads, synthesize_answer
-from src.dependencies import get_supabase, get_gemini_flash, get_gemini_pro, get_embedding_model
+from src.query_engine import synthesize_answer
+from src.dependencies import get_supabase, get_gemini_flash, get_gemini_pro, get_embedding_model, get_settings
 from src.logger import logger
-
-from src.config import settings
+from src.tasks import enrichment_task
+from src.config import Settings
 
 app = FastAPI(
     title="AdGenesis Intelligence Engine",
@@ -37,14 +36,10 @@ class QueryRequest(BaseModel):
 @app.post("/ingest-ad", response_model=IngestAdResponse, status_code=202)
 async def ingest_and_enrich_ad(
     request: IngestAdRequest,
-    background_tasks: BackgroundTasks,
     supabase: Client = Depends(get_supabase),
-    gemini_flash: ChatGoogleGenerativeAI = Depends(get_gemini_flash),
-    gemini_pro: ChatGoogleGenerativeAI = Depends(get_gemini_pro),
-    embedding_model: GoogleGenerativeAIEmbeddings = Depends(get_embedding_model),
 ):
     """
-    Ingests a new raw ad and schedules it for background enrichment.
+    Ingests a new raw ad and schedules it for background enrichment using Celery.
     """
     request.raw_data_snapshot["ad_creative_url"] = request.ad_creative_url
 
@@ -61,37 +56,13 @@ async def ingest_and_enrich_ad(
 
     inserted_ad = AdKnowledgeObject(**response.data[0])
     
-    background_tasks.add_task(
-        enrich_ad_and_update, inserted_ad, supabase, gemini_flash, gemini_pro, embedding_model
-    )
+    # Dispatch the enrichment task to Celery
+    enrichment_task.delay(ad_data_dict=inserted_ad.model_dump())
 
     return IngestAdResponse(
         message="Ad accepted for enrichment.",
         ad_id=str(inserted_ad.id)
     )
-
-async def enrich_ad_and_update(
-    ad: AdKnowledgeObject,
-    supabase: Client,
-    gemini_flash: ChatGoogleGenerativeAI,
-    gemini_pro: ChatGoogleGenerativeAI,
-    embedding_model: GoogleGenerativeAIEmbeddings,
-):
-    """
-    Task to enrich an ad and update its status in Supabase.
-    """
-    try:
-        logger.info(f"Starting enrichment for ad: {ad.id}")
-        enriched_ad = await enrich_ad(ad, gemini_flash, gemini_pro, embedding_model, supabase)
-        supabase.from_("ads").update(enriched_ad.model_dump(exclude_none=True)).eq("id", enriched_ad.id).execute()
-        logger.info(f"Enrichment complete for ad: {ad.id}")
-    except Exception as e:
-        error_message = f"Enrichment failed for ad {ad.id}: {str(e)}"
-        logger.error(error_message)
-        supabase.from_("ads").update({
-            "status": "FAILED",
-            "error_log": error_message
-        }).eq("id", ad.id).execute()
 
 @app.post("/query-ads")
 async def query_ad_intelligence(
@@ -99,15 +70,30 @@ async def query_ad_intelligence(
     supabase: Client = Depends(get_supabase),
     gemini_pro: ChatGoogleGenerativeAI = Depends(get_gemini_pro),
     embedding_model: GoogleGenerativeAIEmbeddings = Depends(get_embedding_model),
+    settings: Settings = Depends(get_settings),
 ):
     """
     Queries the enriched ad data and synthesizes an answer based on the user's natural language query.
     """
-    retrieved_ads = await hybrid_retrieve_ads(
-        request.query, embedding_model, supabase, request.filter_criteria, request.k
+    answer = await synthesize_answer(
+        request.query,
+        gemini_pro,
+        embedding_model,
+        settings,
+        request.filter_criteria,
+        request.k,
     )
-    answer = await synthesize_answer(request.query, retrieved_ads, gemini_pro, embedding_model)
-    return {"query": request.query, "answer": answer, "retrieved_ads_count": len(retrieved_ads)}
+    return {"query": request.query, "answer": answer}
+
+@app.get("/ads/{ad_id}/status")
+async def get_ad_status(ad_id: str, supabase: Client = Depends(get_supabase)):
+    """
+    Retrieves the current status of an ad enrichment task.
+    """
+    response = supabase.from_("ads").select("status, error_log").eq("id", ad_id).execute()
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Ad not found")
+    return response.data[0]
 
 @app.get("/health")
 async def health_check():

@@ -9,3 +9,5 @@ llama-index
 google-generativeai
 loguru
 pytest
+celery
+redis
