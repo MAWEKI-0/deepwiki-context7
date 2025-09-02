@@ -10,10 +10,6 @@ from src.supabase_client import get_supabase_client
 def get_settings() -> Settings:
     return Settings()
 
-@lru_cache()
-def get_genai_client(settings: Settings = Depends(get_settings)) -> genai.Client:
-    return genai.Client(api_key=settings.GOOGLE_API_KEY)
-
 def get_supabase() -> Client:
     return get_supabase_client()
 

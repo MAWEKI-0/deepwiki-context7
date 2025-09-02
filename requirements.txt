@@ -8,6 +8,8 @@ langchain-core
 llama-index
 google-generativeai
 loguru
-pytest
 celery
 redis
+pytest
+httpx
+pytest-asyncio
