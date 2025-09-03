@@ -48,6 +48,7 @@ async def run_test():
                 response = await client.post(INGEST_ENDPOINT, json=ingest_payload, headers=HEADERS)
                 response.raise_for_status()
                 ingest_result = response.json()
+                internal_ad_id = ingest_result.get("ad_id") # Get the internal UUID
                 print(f"Ingestion successful: {ingest_result}")
 
             except httpx.HTTPStatusError as e:
@@ -58,8 +59,27 @@ async def run_test():
                 continue
 
             # Give the background enrichment task some time to run
-            print("Waiting 15 seconds for background enrichment...")
-            await asyncio.sleep(15)
+            print("Waiting 45 seconds for background enrichment...")
+            await asyncio.sleep(45)
+
+            # Check ad enrichment status
+            try:
+                if not internal_ad_id:
+                    print("Skipping status check because internal ad_id was not retrieved.")
+                    continue
+
+                status_endpoint = f"{BASE_URL}/ads/{internal_ad_id}/status"
+                print(f"Checking status for ad ID: {internal_ad_id}")
+                status_response = await client.get(status_endpoint)
+                status_response.raise_for_status()
+                status_result = status_response.json()
+                print(f"Ad status: {status_result.get('status')}")
+                if status_result.get('status') != 'enriched':
+                    print("Warning: Ad is not fully enriched. Query may yield no results.")
+            except httpx.HTTPStatusError as e:
+                print(f"Error checking status for ad ID {ad_id}: {e.response.status_code} - {e.response.text}")
+            except Exception as e:
+                print(f"An unexpected error occurred during status check for ad ID {ad_id}: {e}")
 
             # 2. Query for Related Ads
             try:

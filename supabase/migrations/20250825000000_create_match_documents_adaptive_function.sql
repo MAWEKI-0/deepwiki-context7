@@ -33,7 +33,8 @@ BEGIN
       nested_key := split_part(json_key, '.', 2); -- Assign value using :=
       where_clauses := array_append(where_clauses, format('strategic_analysis->>%L = %L', nested_key, json_value #>> '{}'));
     ELSE
-      where_clauses := array_append(where_clauses, format('%I = %L', json_key, json_value #>> '{}'));
+      -- Assumes other keys are for the raw_data_snapshot JSONB field
+      where_clauses := array_append(where_clauses, format('raw_data_snapshot->>%L = %L', json_key, json_value #>> '{}'));
     END IF;
   END LOOP;
 

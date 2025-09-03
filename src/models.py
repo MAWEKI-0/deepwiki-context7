@@ -32,4 +32,4 @@ class AdKnowledgeObject(BaseModel):
     audience_persona: Optional[str] = Field(None, description="A concise, generated description of the inferred target audience for the ad.")
     vector_summary: Optional[list[float]] = Field(None, description="A vector embedding of a concise, natural language summary of the ad's core strategy. Used for semantic search.")
 
-    model_config = ConfigDict(extra='forbid')
+    model_config = ConfigDict(extra='ignore')

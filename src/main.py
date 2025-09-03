@@ -1,7 +1,9 @@
 import asyncio
+import traceback
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from supabase import Client
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -18,6 +20,18 @@ app = FastAPI(
     description="API for ingesting, enriching, and querying competitor ad intelligence.",
     version="1.0.0",
 )
+
+@app.middleware("http")
+async def global_exception_handler(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as e:
+        error_traceback = traceback.format_exc()
+        logger.error(f"Unhandled exception: {e}\n{error_traceback}")
+        return JSONResponse(
+            status_code=500,
+            content={"message": "Internal server error", "detail": str(e)},
+        )
 
 class IngestAdRequest(BaseModel):
     ad_id: int
@@ -100,6 +114,11 @@ async def health_check():
     Health check endpoint to ensure the API is running.
     """
     return {"status": "ok"}
+
+@app.on_event("shutdown")
+def shutdown_event():
+    logger.info("Shutting down logger.")
+    logger.remove()
 
 if __name__ == "__main__":
     import uvicorn

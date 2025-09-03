@@ -102,7 +102,7 @@ class SupabaseHybridRetriever(BaseRetriever):
 
         if not response.data:
             logger.error(
-                f"Failed to retrieve ads from Supabase: {response.error}"
+                f"Failed to retrieve ads from Supabase: {response}"
             )
             return []
 
@@ -116,6 +116,15 @@ class SupabaseHybridRetriever(BaseRetriever):
             # Note: The RPC function does not currently return a score.
             nodes.append(NodeWithScore(node=node, score=1.0))
         return nodes
+
+    def _retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
+        """
+        Synchronously retrieves nodes from Supabase.
+        This is a synchronous wrapper for the async version.
+        """
+        import asyncio
+
+        return asyncio.run(self._aretrieve(query_bundle))
 
 
 # --- Query Engine Functions ---
