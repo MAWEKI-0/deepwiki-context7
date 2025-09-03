@@ -56,8 +56,8 @@ async def ingest_and_enrich_ad(
 
     inserted_ad = AdKnowledgeObject(**response.data[0])
     
-    # Dispatch the enrichment task to Celery
-    enrichment_task.delay(ad_data_dict=inserted_ad.model_dump())
+    # Dispatch the enrichment task to Celery with only the ad's ID
+    enrichment_task.delay(ad_id=str(inserted_ad.id))
 
     return IngestAdResponse(
         message="Ad accepted for enrichment.",
@@ -70,18 +70,17 @@ async def query_ad_intelligence(
     supabase: Client = Depends(get_supabase),
     gemini_pro: ChatGoogleGenerativeAI = Depends(get_gemini_pro),
     embedding_model: GoogleGenerativeAIEmbeddings = Depends(get_embedding_model),
-    settings: Settings = Depends(get_settings),
 ):
     """
     Queries the enriched ad data and synthesizes an answer based on the user's natural language query.
     """
     answer = await synthesize_answer(
-        request.query,
-        gemini_pro,
-        embedding_model,
-        settings,
-        request.filter_criteria,
-        request.k,
+        query=request.query,
+        supabase=supabase,
+        gemini_pro=gemini_pro,
+        embedding_model=embedding_model,
+        filter_criteria=request.filter_criteria,
+        k=request.k,
     )
     return {"query": request.query, "answer": answer}
 

@@ -22,14 +22,15 @@ CREATE INDEX IF NOT EXISTS idx_ads_vector_summary_hnsw ON public.ads USING hnsw 
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.ads ENABLE ROW LEVEL SECURITY;
 
--- RLS Policies (example - adjust as needed for your application's security model)
--- Allow authenticated users to read their own ads (if applicable, or all enriched ads)
-CREATE POLICY "Allow read access for all users" ON public.ads
-FOR SELECT USING (true);
-
--- Allow service role to insert and update ads (for the enrichment pipeline)
-CREATE POLICY "Allow service role to manage ads" ON public.ads
-FOR ALL TO service_role USING (true) WITH CHECK (true);
+-- RLS Policies
+-- This policy restricts all access (SELECT, INSERT, UPDATE, DELETE) to the 'ads' table
+-- to only the service_role. This is a critical security measure to ensure that
+-- only our authenticated backend can interact with the ad intelligence data.
+-- Anonymous and regular authenticated users are denied access.
+CREATE POLICY "Allow full access for service role only" ON public.ads
+FOR ALL
+USING (auth.role() = 'service_role')
+WITH CHECK (auth.role() = 'service_role');
 
 -- Optional: If users can create their own ads, add a policy for inserts
 -- CREATE POLICY "Allow authenticated users to insert their own ads" ON public.ads

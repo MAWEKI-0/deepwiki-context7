@@ -15,8 +15,6 @@ from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
 from llama_index.vector_stores.supabase import SupabaseVectorStore
 from supabase import Client
 
-from src.config import Settings
-from src.dependencies import get_settings
 from src.logger import logger
 from src.models import AdKnowledgeObject, StrategicAnalysis
 
@@ -123,9 +121,9 @@ class SupabaseHybridRetriever(BaseRetriever):
 # --- Query Engine Functions ---
 async def synthesize_answer(
     query: str,
+    supabase: Client,
     gemini_pro: ChatGoogleGenerativeAI,
     embedding_model: GoogleGenerativeAIEmbeddings,
-    settings: Settings,  # Inject settings here
     filter_criteria: Optional[Dict[str, Any]] = None,
     k: int = 5,
     max_critique_loops: int = 2,
@@ -135,7 +133,7 @@ async def synthesize_answer(
     """
     # --- LlamaIndex Integration ---
     retriever = SupabaseHybridRetriever(
-        supabase_client=get_settings().supabase_client,
+        supabase_client=supabase,
         embedding_model=embedding_model,
         k=k,
         filter_criteria=filter_criteria,

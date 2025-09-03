@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from supabase import Client
 
 from src.config import Settings
-from src.models import AdKnowledgeObject, StrategicAnalysis
+from src.models import AdKnowledgeObject, StrategicAnalysis, VisualAnalysis
 from src.logger import logger
 from src.dependencies import get_settings
 
@@ -20,6 +20,8 @@ from src.dependencies import get_settings
 
 # --- Pydantic Output Parsers ---
 strategic_analysis_parser = PydanticOutputParser(pydantic_object=StrategicAnalysis)
+visual_analysis_parser = PydanticOutputParser(pydantic_object=VisualAnalysis)
+
 
 # --- Prompt Templates ---
 VISUAL_ANALYSIS_PROMPT_TEMPLATE = """
@@ -28,17 +30,14 @@ Focus on the visual style, key elements, and overall impression.
 
 Ad Creative URL: {ad_creative_url}
 
-Provide your analysis as a JSON object with the following structure:
-{{
-    "visual_style": "e.g., 'minimalist', 'bold & vibrant', 'user-generated content', 'product-focused'",
-    "key_visual_elements": ["list", "of", "prominent", "elements"],
-    "color_palette": "e.g., 'warm tones', 'cool tones', 'monochromatic', 'bright & contrasting'",
-    "overall_impression": "A brief summary of the ad's visual impact and message conveyed visually."
-}}
+{format_instructions}
+
+Provide your analysis in the specified JSON format.
 """
 visual_analysis_prompt = PromptTemplate(
     template=VISUAL_ANALYSIS_PROMPT_TEMPLATE,
     input_variables=["ad_creative_url"],
+    partial_variables={"format_instructions": visual_analysis_parser.get_format_instructions()},
 )
 
 STRATEGIC_ANALYSIS_PROMPT_TEMPLATE = """
@@ -76,29 +75,29 @@ audience_persona_prompt = PromptTemplate(
 
 # --- Enrichment Pipeline Functions ---
 
-def perform_visual_analysis(ad_creative_url: str, gemini_flash: ChatGoogleGenerativeAI) -> Dict[str, Any]:
-    """Performs visual analysis using Gemini 1.5 Flash."""
-    chain = visual_analysis_prompt | gemini_flash
+def perform_visual_analysis(ad_creative_url: str, gemini_flash: ChatGoogleGenerativeAI) -> VisualAnalysis:
+    """Performs visual analysis using Gemini 1.5 Flash and PydanticOutputParser for safe parsing."""
+    chain = visual_analysis_prompt | gemini_flash | visual_analysis_parser
     response = chain.invoke({"ad_creative_url": ad_creative_url})
-    return response.json() # Assuming Gemini Flash returns valid JSON directly
+    return response
 
-def perform_strategic_analysis(raw_ad_data: Dict[str, Any], targeting_data: Dict[str, Any], visual_analysis: Dict[str, Any], gemini_pro: ChatGoogleGenerativeAI) -> StrategicAnalysis:
+def perform_strategic_analysis(raw_ad_data: Dict[str, Any], targeting_data: Dict[str, Any], visual_analysis: VisualAnalysis, gemini_pro: ChatGoogleGenerativeAI) -> StrategicAnalysis:
     """Performs deep strategic analysis using Gemini 1.5 Pro."""
     chain = strategic_analysis_prompt | gemini_pro | strategic_analysis_parser
     response = chain.invoke({
         "raw_ad_data": raw_ad_data,
         "targeting_data": targeting_data,
-        "visual_analysis": visual_analysis
+        "visual_analysis": visual_analysis.model_dump()
     })
     return response
 
-def generate_audience_persona(raw_ad_data: Dict[str, Any], strategic_analysis: StrategicAnalysis, visual_analysis: Dict[str, Any], gemini_pro: ChatGoogleGenerativeAI) -> str:
+def generate_audience_persona(raw_ad_data: Dict[str, Any], strategic_analysis: StrategicAnalysis, visual_analysis: VisualAnalysis, gemini_pro: ChatGoogleGenerativeAI) -> str:
     """Generates a concise audience persona using Gemini 1.5 Pro."""
     chain = audience_persona_prompt | gemini_pro
     response = chain.invoke({
         "raw_ad_data": raw_ad_data,
         "strategic_analysis": strategic_analysis.model_dump_json(), # Pass as JSON string
-        "visual_analysis": visual_analysis
+        "visual_analysis": visual_analysis.model_dump()
     })
     return response.content.strip()
 
