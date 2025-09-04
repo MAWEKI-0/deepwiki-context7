@@ -1,17 +1,15 @@
 from fastapi import Depends
 from supabase import Client
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from functools import lru_cache
 import google.generativeai as genai
 from llama_index.llms.langchain import LangChainLLM
 from src.config import Settings
 from src.supabase_client import get_supabase_client
 
-@lru_cache()
 def get_settings() -> Settings:
     return Settings()
 
-def get_supabase() -> Client:
+def get_supabase_client() -> Client:
     return get_supabase_client()
 
 def get_gemini_flash(settings: Settings = Depends(get_settings)) -> LangChainLLM:

@@ -1,3 +1,4 @@
+from celery import Task
 from celery.exceptions import Reject
 from src.celery_app import celery_app
 from src.enrichment_pipeline import enrich_ad
@@ -5,7 +6,42 @@ from src.models import AdKnowledgeObject
 from src.logger import logger
 from src.dependencies import get_supabase_client, get_gemini_flash, get_gemini_pro, get_embedding_model
 
-@celery_app.task(bind=True, max_retries=3, default_retry_delay=60, ignore_result=True)
+# Import necessary classes for client types
+from supabase import Client as SupabaseClient
+from google.generativeai.client import Client as GeminiClient
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+class BaseTaskWithClients(Task):
+    _supabase_client: SupabaseClient = None
+    _gemini_flash_client: GeminiClient = None
+    _gemini_pro_client: GeminiClient = None
+    _embedding_model_instance: GoogleGenerativeAIEmbeddings = None
+
+    @property
+    def supabase_client(self) -> SupabaseClient:
+        if self._supabase_client is None:
+            self._supabase_client = get_supabase_client()
+        return self._supabase_client
+
+    @property
+    def gemini_flash_client(self) -> GeminiClient:
+        if self._gemini_flash_client is None:
+            self._gemini_flash_client = get_gemini_flash()
+        return self._gemini_flash_client
+
+    @property
+    def gemini_pro_client(self) -> GeminiClient:
+        if self._gemini_pro_client is None:
+            self._gemini_pro_client = get_gemini_pro()
+        return self._gemini_pro_client
+
+    @property
+    def embedding_model_instance(self) -> GoogleGenerativeAIEmbeddings:
+        if self._embedding_model_instance is None:
+            self._embedding_model_instance = get_embedding_model()
+        return self._embedding_model_instance
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60, ignore_result=True, base=BaseTaskWithClients)
 def enrichment_task(self, ad_id: str):
     """
     Celery task to enrich an ad, fetching data from the DB.
@@ -14,11 +50,11 @@ def enrichment_task(self, ad_id: str):
     try:
         logger.info(f"Starting enrichment for ad ID: {ad_id}")
 
-        # Initialize clients within the task
-        supabase = get_supabase_client()
-        gemini_flash = get_gemini_flash()
-        gemini_pro = get_gemini_pro()
-        embedding_model = get_embedding_model()
+        # Access clients from the task instance
+        supabase = self.supabase_client
+        gemini_flash = self.gemini_flash_client
+        gemini_pro = self.gemini_pro_client
+        embedding_model = self.embedding_model_instance
 
         # Fetch the ad data from Supabase
         response = supabase.from_("ads").select("*").eq("id", ad_id).single().execute()

@@ -112,7 +112,6 @@ def enrich_ad(
     gemini_pro: ChatGoogleGenerativeAI,
     embedding_model: GoogleGenerativeAIEmbeddings,
     supabase: Client,
-    settings: Settings, # Inject settings here
 ) -> AdKnowledgeObject:
     """
     Orchestrates the ad enrichment process.

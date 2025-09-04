@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     GEMINI_PRO_MODEL: str = "gemini-2.5-flash-lite"
 
     # Embedding Model
-    EMBEDDING_MODEL: str = "models/text-embedding-004" # Or other suitable embedding model
+    EMBEDDING_MODEL: str = "gemini-embedding-001" # Google embedding model
 
     # Celery
     REDIS_URL: str = "redis://localhost:6379/0"
