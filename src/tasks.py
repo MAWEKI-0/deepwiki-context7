@@ -4,41 +4,49 @@ from src.celery_app import celery_app
 from src.enrichment_pipeline import enrich_ad
 from src.models import AdKnowledgeObject
 from src.logger import logger
-from src.dependencies import get_supabase_client, get_gemini_flash, get_gemini_pro, get_embedding_model
+from src.dependencies import get_supabase, create_gemini_flash_client, create_gemini_pro_client, create_embedding_model_client
+from src.config import Settings
 
 # Import necessary classes for client types
 from supabase import Client as SupabaseClient
-from google.generativeai.client import Client as GeminiClient
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from llama_index.llms.langchain import LangChainLLM
 
 class BaseTaskWithClients(Task):
     _supabase_client: SupabaseClient = None
-    _gemini_flash_client: GeminiClient = None
-    _gemini_pro_client: GeminiClient = None
+    _gemini_flash_client: LangChainLLM = None
+    _gemini_pro_client: LangChainLLM = None
     _embedding_model_instance: GoogleGenerativeAIEmbeddings = None
+    _settings: Settings = None
+
+    @property
+    def settings(self) -> Settings:
+        if self._settings is None:
+            self._settings = Settings()
+        return self._settings
 
     @property
     def supabase_client(self) -> SupabaseClient:
         if self._supabase_client is None:
-            self._supabase_client = get_supabase_client()
+            self._supabase_client = get_supabase()
         return self._supabase_client
 
     @property
-    def gemini_flash_client(self) -> GeminiClient:
+    def gemini_flash_client(self) -> LangChainLLM:
         if self._gemini_flash_client is None:
-            self._gemini_flash_client = get_gemini_flash()
+            self._gemini_flash_client = create_gemini_flash_client(self.settings)
         return self._gemini_flash_client
 
     @property
-    def gemini_pro_client(self) -> GeminiClient:
+    def gemini_pro_client(self) -> LangChainLLM:
         if self._gemini_pro_client is None:
-            self._gemini_pro_client = get_gemini_pro()
+            self._gemini_pro_client = create_gemini_pro_client(self.settings)
         return self._gemini_pro_client
 
     @property
     def embedding_model_instance(self) -> GoogleGenerativeAIEmbeddings:
         if self._embedding_model_instance is None:
-            self._embedding_model_instance = get_embedding_model()
+            self._embedding_model_instance = create_embedding_model_client(self.settings)
         return self._embedding_model_instance
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60, ignore_result=True, base=BaseTaskWithClients)

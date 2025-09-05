@@ -10,7 +10,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 
 from src.models import AdKnowledgeObject
 from src.query_engine import synthesize_answer
-from src.dependencies import get_supabase, get_gemini_flash, get_gemini_pro, get_embedding_model, get_settings
+from src.dependencies import get_supabase, get_settings, create_gemini_pro_client, create_embedding_model_client
 from src.logger import logger
 from src.tasks import enrichment_task
 from src.config import Settings
@@ -82,9 +82,10 @@ async def ingest_and_enrich_ad(
 async def query_ad_intelligence(
     request: QueryRequest,
     supabase: Client = Depends(get_supabase),
-    gemini_pro: ChatGoogleGenerativeAI = Depends(get_gemini_pro),
-    embedding_model: GoogleGenerativeAIEmbeddings = Depends(get_embedding_model),
+    settings: Settings = Depends(get_settings),
 ):
+    gemini_pro: ChatGoogleGenerativeAI = create_gemini_pro_client(settings)
+    embedding_model: GoogleGenerativeAIEmbeddings = create_embedding_model_client(settings)
     """
     Queries the enriched ad data and synthesizes an answer based on the user's natural language query.
     """
