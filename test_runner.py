@@ -2,6 +2,7 @@ import asyncio
 import json
 import httpx
 import time
+from celery.result import AsyncResult
 
 # Configuration
 BASE_URL = "http://localhost:8000"
@@ -24,7 +25,7 @@ async def run_test():
         print(f"Error: Could not decode JSON from {TEST_DATA_PATH}")
         return
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=120.0) as client: # Increased timeout for potentially longer enrichment
         for i, ad_data in enumerate(test_data):
             print(f"--- Processing Ad {i+1}/{len(test_data)} (ID: {ad_data.get('ad_id')}) ---")
 
@@ -49,6 +50,7 @@ async def run_test():
                 response.raise_for_status()
                 ingest_result = response.json()
                 internal_ad_id = ingest_result.get("ad_id") # Get the internal UUID
+                celery_task_id = ingest_result.get("task_id") # Get the Celery task ID
                 print(f"Ingestion successful: {ingest_result}")
 
             except httpx.HTTPStatusError as e:
@@ -58,11 +60,28 @@ async def run_test():
                 print(f"An unexpected error occurred during ingestion for ad ID {ad_id}: {e}")
                 continue
 
-            # Give the background enrichment task some time to run
-            print("Waiting 45 seconds for background enrichment...")
-            await asyncio.sleep(45)
+            # Wait for the background enrichment task to complete using Celery's AsyncResult
+            if celery_task_id:
+                print(f"Waiting for Celery enrichment task {celery_task_id} to complete...")
+                task_result = AsyncResult(celery_task_id)
+                timeout_seconds = 120 # Maximum wait time for enrichment
+                start_time = time.time()
+                while not task_result.ready() and (time.time() - start_time) < timeout_seconds:
+                    print(f"Task {celery_task_id} status: {task_result.status}. Waiting...")
+                    await asyncio.sleep(5) # Poll every 5 seconds
 
-            # Check ad enrichment status
+                if task_result.ready():
+                    print(f"Celery task {celery_task_id} completed with status: {task_result.status}")
+                    if task_result.successful():
+                        print("Enrichment task successful.")
+                    else:
+                        print(f"Enrichment task failed: {task_result.traceback}")
+                else:
+                    print(f"Warning: Celery task {celery_task_id} timed out after {timeout_seconds} seconds.")
+            else:
+                print("No Celery task ID received, skipping explicit wait for enrichment.")
+
+            # Check ad enrichment status (this can remain as a secondary check)
             try:
                 if not internal_ad_id:
                     print("Skipping status check because internal ad_id was not retrieved.")

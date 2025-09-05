@@ -13,40 +13,35 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from llama_index.llms.langchain import LangChainLLM
 
 class BaseTaskWithClients(Task):
-    _supabase_client: SupabaseClient = None
-    _gemini_flash_client: LangChainLLM = None
-    _gemini_pro_client: LangChainLLM = None
-    _embedding_model_instance: GoogleGenerativeAIEmbeddings = None
-    _settings: Settings = None
+    """
+    Base Celery Task class that initializes clients once per worker process.
+    """
+    def __init__(self):
+        super().__init__()
+        self._settings = Settings()
+        self._supabase_client = get_supabase()
+        self._gemini_flash_client = create_gemini_flash_client(self._settings)
+        self._gemini_pro_client = create_gemini_pro_client(self._settings)
+        self._embedding_model_instance = create_embedding_model_client(self._settings)
 
     @property
     def settings(self) -> Settings:
-        if self._settings is None:
-            self._settings = Settings()
         return self._settings
 
     @property
     def supabase_client(self) -> SupabaseClient:
-        if self._supabase_client is None:
-            self._supabase_client = get_supabase()
         return self._supabase_client
 
     @property
     def gemini_flash_client(self) -> LangChainLLM:
-        if self._gemini_flash_client is None:
-            self._gemini_flash_client = create_gemini_flash_client(self.settings)
         return self._gemini_flash_client
 
     @property
     def gemini_pro_client(self) -> LangChainLLM:
-        if self._gemini_pro_client is None:
-            self._gemini_pro_client = create_gemini_pro_client(self.settings)
         return self._gemini_pro_client
 
     @property
     def embedding_model_instance(self) -> GoogleGenerativeAIEmbeddings:
-        if self._embedding_model_instance is None:
-            self._embedding_model_instance = create_embedding_model_client(self.settings)
         return self._embedding_model_instance
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60, ignore_result=True, base=BaseTaskWithClients)
@@ -73,13 +68,17 @@ def enrichment_task(self, ad_id: str):
 
         ad_data = AdKnowledgeObject(**response.data)
 
-        # Idempotency Check
-        if ad_data.status in ['ENRICHED', 'ENRICHING']:
-            logger.warning(f"Ad {ad_id} is already {ad_data.status}. Skipping task.")
+        # Atomic Idempotency Check and Status Update
+        # Attempt to set status to ENRICHING only if it's currently PENDING
+        update_response = supabase.from_("ads").update({"status": "ENRICHING"}).eq("id", ad_id).eq("status", "PENDING").execute()
+
+        if update_response.count == 0:
+            # If no rows were updated, it means the ad was not in PENDING status,
+            # or it was already ENRICHED/ENRICHING by another process.
+            response = supabase.from_("ads").select("status").eq("id", ad_id).single().execute()
+            current_status = response.data["status"] if response.data else "UNKNOWN"
+            logger.warning(f"Ad {ad_id} is already {current_status} or not found. Skipping task.")
             return
-        
-        # Set status to ENRICHING
-        supabase.from_("ads").update({"status": "ENRICHING"}).eq("id", ad_id).execute()
 
         # Run the enrichment pipeline using clients from the task instance
         enriched_ad = enrich_ad(

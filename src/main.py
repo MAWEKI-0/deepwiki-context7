@@ -41,6 +41,7 @@ class IngestAdRequest(BaseModel):
 class IngestAdResponse(BaseModel):
     message: str
     ad_id: str
+    task_id: str
 
 class QueryRequest(BaseModel):
     query: str
@@ -71,11 +72,12 @@ async def ingest_and_enrich_ad(
     inserted_ad = AdKnowledgeObject(**response.data[0])
     
     # Dispatch the enrichment task to Celery with only the ad's ID
-    enrichment_task.delay(ad_id=str(inserted_ad.id))
+    task = enrichment_task.delay(ad_id=str(inserted_ad.id))
 
     return IngestAdResponse(
         message="Ad accepted for enrichment.",
-        ad_id=str(inserted_ad.id)
+        ad_id=str(inserted_ad.id),
+        task_id=task.id
     )
 
 @app.post("/query-ads")
