@@ -125,6 +125,57 @@ def test_generate_audience_persona(mock_gemini_pro):
     # No assert_called_once on the fixture mock, as we used a local one
 
 
+@patch("src.enrichment_pipeline.audience_persona_prompt")
+def test_generate_audience_persona_visual_analysis_is_json(mock_prompt):
+    """
+    Tests that the visual_analysis object is passed as a JSON string
+    to the LLM chain in generate_audience_persona.
+    """
+    # Create mock objects for the function arguments
+    strategic_analysis_mock = StrategicAnalysis(
+        marketing_angle="Test Angle",
+        emotional_appeal="Test Appeal",
+        cta_analysis="Test CTA",
+        key_claims=["Test Claim"],
+        confidence_score=0.9,
+    )
+    visual_analysis_mock = VisualAnalysis(
+        visual_style="Test Style",
+        key_visual_elements=["Test Element"],
+        color_palette="Test Palette",
+        overall_impression="Test Impression",
+    )
+    # Mock the chain and its invoke method
+    mock_chain = MagicMock()
+    # mock_prompt.format_prompt.return_value = mock_chain
+    mock_llm = MagicMock()
+    mock_llm.invoke.return_value = AIMessage(content="Test Persona")
+
+    # Recreate the chain with the mocked prompt and a mocked LLM
+    chain = mock_prompt | mock_llm
+
+    # Call the function
+    generate_audience_persona(
+        raw_ad_data={},
+        strategic_analysis=strategic_analysis_mock,
+        visual_analysis=visual_analysis_mock,
+        gemini_pro=mock_llm,  # Pass the mocked LLM
+    )
+
+    # Assert that invoke was called on the LLM
+    mock_llm.invoke.assert_called_once()
+
+    # Get the arguments passed to invoke
+    invoke_args, invoke_kwargs = mock_llm.invoke.call_args
+
+    # The actual prompt object is passed, so we need to inspect its 'messages'
+    # The first message's content will be the formatted string
+    prompt_input = invoke_args[0].to_messages()[0].content
+
+    # A bit of a hacky way to check, but we can see if the JSON string is in the prompt
+    assert visual_analysis_mock.model_dump_json() in prompt_input
+
+
 def test_generate_vector_summary(mock_embedding_model):
     text = "Test summary text"
     result = generate_vector_summary(text, mock_embedding_model)

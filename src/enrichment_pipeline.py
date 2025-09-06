@@ -97,7 +97,7 @@ def generate_audience_persona(raw_ad_data: Dict[str, Any], strategic_analysis: S
     response = chain.invoke({
         "raw_ad_data": raw_ad_data,
         "strategic_analysis": strategic_analysis.model_dump_json(), # Pass as JSON string
-        "visual_analysis": visual_analysis.model_dump()
+        "visual_analysis": visual_analysis.model_dump_json()
     })
     return response.content.strip()
 
