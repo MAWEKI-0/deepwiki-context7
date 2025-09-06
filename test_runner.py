@@ -8,7 +8,7 @@ from celery.result import AsyncResult
 BASE_URL = "http://localhost:8000"
 INGEST_ENDPOINT = f"{BASE_URL}/ingest-ad"
 QUERY_ENDPOINT = f"{BASE_URL}/query-ads"
-TEST_DATA_PATH = "test_dataset (3).json"
+TEST_DATA_PATH = "test_dataset.json"
 HEADERS = {"Content-Type": "application/json"}
 
 async def run_test():

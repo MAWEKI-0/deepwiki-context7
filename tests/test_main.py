@@ -3,7 +3,6 @@ from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, patch
 
 from src.main import app
-from src.dependencies import get_supabase, get_gemini_pro, get_embedding_model
 
 # Create a TestClient instance
 client = TestClient(app)
@@ -63,6 +62,12 @@ def test_query_ad_intelligence_api_error(mock_synthesize_answer):
 
     payload = {"query": "This will fail"}
 
-    # The TestClient will raise the exception, so we use pytest.raises
-    with pytest.raises(Exception, match="LLM provider is down"):
-        client.post("/query-ads", json=payload)
+    # Make the request to the test client
+    response = client.post("/query-ads", json=payload)
+
+    # Assertions
+    assert response.status_code == 500
+    assert response.json() == {
+        "message": "Internal server error",
+        "detail": "LLM provider is down",
+    }

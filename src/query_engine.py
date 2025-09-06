@@ -1,16 +1,17 @@
 import os
 from typing import Any, Dict, List, Optional
 
-import google.generativeai as genai
+import google.genai as genai
 from langchain_core.prompts import PromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
 from llama_index.core import (
     VectorStoreIndex,
     SimpleDirectoryReader,
-    get_response_synthesizer,
 )
+from llama_index.core.response_synthesizers import get_response_synthesizer
 from llama_index.core.query_engine import RetrieverQueryEngine
-from llama_index.core.retrievers import BaseRetriever
+from llama_index.core.base.base_retriever import BaseRetriever
 from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
 from llama_index.vector_stores.supabase import SupabaseVectorStore
 from supabase import Client

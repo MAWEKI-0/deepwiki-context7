@@ -13,7 +13,7 @@ celery_app = Celery(
 )
 
 # Import the custom task class after celery_app is defined to avoid circular import
-from src.tasks import BaseTaskWithClients
+from src.celery_base import BaseTaskWithClients
 celery_app.Task = BaseTaskWithClients  # Assign our custom task class
 
 celery_app.config_from_object('src.celeryconfig')

@@ -3,10 +3,11 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-import google.generativeai as genai
-from langchain_core.output_parsers import PydanticOutputParser
+import google.genai as genai
+from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import PromptTemplate
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_google_genai.embeddings import GoogleGenerativeAIEmbeddings
 from pydantic import BaseModel, Field
 from supabase import Client
 
@@ -18,45 +19,39 @@ from src.dependencies import get_settings
 # Configure Google AI (This will be moved into the functions that use it)
 # genai.configure(api_key=settings.GOOGLE_API_KEY)
 
-# --- Pydantic Output Parsers ---
-strategic_analysis_parser = PydanticOutputParser(pydantic_object=StrategicAnalysis)
-visual_analysis_parser = PydanticOutputParser(pydantic_object=VisualAnalysis)
-
+# --- JSON Output Parser ---
+json_parser = JsonOutputParser()
 
 # --- Prompt Templates ---
 VISUAL_ANALYSIS_PROMPT_TEMPLATE = """
 You are an expert marketing analyst. Your task is to analyze an ad creative and provide a structured visual analysis.
 Focus on the visual style, key elements, and overall impression.
+Return a JSON object with the following keys: 'visual_style', 'key_visual_elements', 'color_palette', 'overall_impression'.
 
 Ad Creative URL: {ad_creative_url}
 
-{format_instructions}
-
-Provide your analysis in the specified JSON format.
+Provide your analysis as a single JSON object.
 """
 visual_analysis_prompt = PromptTemplate(
     template=VISUAL_ANALYSIS_PROMPT_TEMPLATE,
     input_variables=["ad_creative_url"],
-    partial_variables={"format_instructions": visual_analysis_parser.get_format_instructions()},
 )
 
 STRATEGIC_ANALYSIS_PROMPT_TEMPLATE = """
 You are a highly experienced marketing strategist. Your goal is to perform a deep strategic analysis of an advertisement.
 Consider the raw ad text, targeting data, and the provided visual analysis.
 Extract the core marketing angle, emotional appeal, call-to-action effectiveness, and key claims.
+Return a JSON object with the following keys: 'marketing_angle', 'emotional_appeal', 'cta_analysis', 'key_claims', 'confidence_score'.
 
 Raw Ad Data: {raw_ad_data}
 Targeting Data: {targeting_data}
 Visual Analysis: {visual_analysis}
 
-{format_instructions}
-
-Provide your analysis in the specified JSON format.
+Provide your analysis as a single JSON object.
 """
 strategic_analysis_prompt = PromptTemplate(
     template=STRATEGIC_ANALYSIS_PROMPT_TEMPLATE,
     input_variables=["raw_ad_data", "targeting_data", "visual_analysis"],
-    partial_variables={"format_instructions": strategic_analysis_parser.get_format_instructions()},
 )
 
 AUDIENCE_PERSONA_PROMPT_TEMPLATE = """
@@ -76,20 +71,20 @@ audience_persona_prompt = PromptTemplate(
 # --- Enrichment Pipeline Functions ---
 
 def perform_visual_analysis(ad_creative_url: str, gemini_flash: ChatGoogleGenerativeAI) -> VisualAnalysis:
-    """Performs visual analysis using Gemini 1.5 Flash and PydanticOutputParser for safe parsing."""
-    chain = visual_analysis_prompt | gemini_flash | visual_analysis_parser
-    response = chain.invoke({"ad_creative_url": ad_creative_url})
-    return response
+    """Performs visual analysis using Gemini 1.5 Flash and returns a VisualAnalysis object."""
+    chain = visual_analysis_prompt | gemini_flash | json_parser
+    response_dict = chain.invoke({"ad_creative_url": ad_creative_url})
+    return VisualAnalysis(**response_dict)
 
 def perform_strategic_analysis(raw_ad_data: Dict[str, Any], targeting_data: Dict[str, Any], visual_analysis: VisualAnalysis, gemini_pro: ChatGoogleGenerativeAI) -> StrategicAnalysis:
     """Performs deep strategic analysis using Gemini 1.5 Pro."""
-    chain = strategic_analysis_prompt | gemini_pro | strategic_analysis_parser
-    response = chain.invoke({
+    chain = strategic_analysis_prompt | gemini_pro | json_parser
+    response_dict = chain.invoke({
         "raw_ad_data": raw_ad_data,
         "targeting_data": targeting_data,
         "visual_analysis": visual_analysis.model_dump()
     })
-    return response
+    return StrategicAnalysis(**response_dict)
 
 def generate_audience_persona(raw_ad_data: Dict[str, Any], strategic_analysis: StrategicAnalysis, visual_analysis: VisualAnalysis, gemini_pro: ChatGoogleGenerativeAI) -> str:
     """Generates a concise audience persona using Gemini 1.5 Pro."""
